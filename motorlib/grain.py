@@ -6,6 +6,7 @@ from .properties import *
 import numpy as np
 import skfmm
 from skimage import measure
+from abc import abstractmethod
 
 class grain(propertyCollection):
     geomName = None
@@ -17,29 +18,35 @@ class grain(propertyCollection):
     def getVolumeSlice(self, r, dR):
         return self.getVolumeAtRegression(r) - self.getVolumeAtRegression(r + dR)
 
+    @abstractmethod
     def getSurfaceAreaAtRegression(self, r):
-        return None
-    
-    def getVolumeAtRegression(self, r):
-        return None
+        pass
 
+    @abstractmethod
+    def getVolumeAtRegression(self, r):
+        pass
+
+    @abstractmethod
     def getWebLeft(self, r): # Returns the shortest distance the grain has to regress to burn out
-        return None
+        pass
 
     def isWebLeft(self, r, burnoutThres = 0.00001):
         return self.getWebLeft(r) > burnoutThres
 
+    @abstractmethod
     def getMassFlux(self, massIn, dt, r, dr, position, density):
-        return None
+        pass
 
     def getPeakMassFlux(self, massIn, dt, r, dr, density):
         return self.getMassFlux(massIn, dt, r, dr, self.getEndPositions(r)[1], density) # Assumes that peak mass flux for each grain is at the port of the grain
 
+    @abstractmethod
     def getEndPositions(self, r): # Returns the positions of the grain ends relative to the original (unburned) grain top
-        return None
+        pass
 
+    @abstractmethod
     def getPortArea(self, r):
-        return None
+        pass
 
     def getRegressedLength(self, r):
         endPos = self.getEndPositions(r)
@@ -48,8 +55,9 @@ class grain(propertyCollection):
     def getDetailsString(self, preferences):
         return 'Length: ' + self.props['length'].dispFormat(preferences.units.getProperty('m'))
 
+    @abstractmethod
     def simulationSetup(self, preferences): # Do anything needed to prepare this grain for simulation
-        return None
+        pass
 
     def getGeometryErrors(self):
         errors = []
@@ -59,8 +67,14 @@ class grain(propertyCollection):
             errors.append(simAlert(simAlertLevel.ERROR, simAlertType.GEOMETRY, 'Length must not be 0'))
         return errors
 
+    @abstractmethod
+    def getPortHydraulicDiameter(self, r):
+        """Hydraulic Diameter used for erosive burning calculations"""
+
+
 class perforatedGrain(grain): # A grain with a hole of some shape through the center
     geomName = 'perfGrain'
+
     def __init__(self):
         super().__init__()
         self.props['inhibitedEnds'] = enumProperty('Inhibited ends', ['Neither', 'Top', 'Bottom', 'Both'])
@@ -76,11 +90,13 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
         elif self.props['inhibitedEnds'].getValue() == 'Both':
             return [0, self.props['length'].getValue()]
 
+    @abstractmethod
     def getCorePerimeter(self, r):
-        return None
+        pass
 
+    @abstractmethod
     def getFaceArea(self, r):
-        return None
+        pass
 
     def getCoreSurfaceArea(self, r):
         corePerimeter = self.getCorePerimeter(r)
@@ -136,11 +152,18 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
             mf = massIn + (self.getVolumeSlice(r, dr) * density / dt)
             return mf / geometry.circleArea(diameter)
 
+    @abstractmethod
     def getFaceImage(self, mapDim):
-        return None
+        pass
 
+    @abstractmethod
     def getRegressionData(self, mapDim, numContours = 15):
-        return None
+        pass
+
+    def getPortHydraulicDiameter(self, r):
+        """See Modified Mukunda & Paul, 10.1016/j.actaastro.2013.07.017"""
+        return self.getCorePerimeter(r) / np.pi
+
 
 class fmmGrain(perforatedGrain):
     geomName = 'fmmGrain'

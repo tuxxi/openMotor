@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QWidget, QDialog
 from PyQt5.uic import loadUi
 from PyQt5.QtCore import pyqtSignal
 
-from motorlib import propertyCollection, floatProperty, intProperty, enumProperty
+from motorlib import propertyCollection, floatProperty, intProperty, enumProperty, boolProperty
 from motorlib import unitLabels, getAllConversions
 
 class preferences():
@@ -13,6 +13,8 @@ class preferences():
         self.general.props['timestep'] = floatProperty('Simulation Timestep', 's', 0.0001, 0.1)
         self.general.props['ambPressure'] = floatProperty('Ambient Pressure', 'Pa', 0.0001, 102000)
         self.general.props['mapDim'] = intProperty('Grain Map Dimension', '', 250, 2000)
+        self.general.props['erosive'] = boolProperty('Erosive Burning', False)
+        self.general.props['erosive_dx'] = floatProperty('Erosive Burn Step Value', 'm', 0.0001, 1)
         self.units = propertyCollection()
         for unit in unitLabels:
             self.units.props[unit] = enumProperty(unitLabels[unit], getAllConversions(unit))

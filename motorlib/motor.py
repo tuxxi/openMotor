@@ -63,7 +63,7 @@ class motor():
 
         if p_c == 0:
             return 0
- 
+
         p_e = self.nozzle.getExitPressure(k, p_c)
 
         t1 = (2*(k**2))/(k-1)
@@ -78,18 +78,39 @@ class motor():
 
         return f
 
+    def calcErosiveFraction(self, G, r_0, grain, dx):
+        """Calculate erosive burn rate fraction for some dx of grain
+        Based on modified Mukunda and Paul model
+        Erosive fraction is defined r/r_0,
+        therefore total burn rate including erosive fraction is r * r_0
+        """
+        rho = self.propellant.getProperty('density')
+        mu = self.propellant.getProperty('mu')
+        d_0 = grain.getPortHydraulicDiameter()
+        R_e = rho * r_0 * d_0 / mu # Reynolds' Number
+        g = (G / rho * r_0) * (R_e/ 1000) ** -0.125 # mass flux ratio modified for size effects
+        g_th = 35.0 # mass flux threshold: if g is below this value, no erosive effects are considered
+        return 1.0 + 0.023*(g ** 0.8 - g_th ** 0.8) * np.heaviside(g - g_th, 0)
+
+    def calcSteadyStateBurnRate(self, simRes):
+        # r = aP**n
+        return self.propellant.getProperty('a') * (simRes.channels['pressure'].getLast() ** self.propellant.getProperty('n'))
     def runSimulation(self, preferences = None, callback = None):
         if preferences is not None:
             ambientPressure = preferences.general.getProperty('ambPressure')
             burnoutWebThres = preferences.general.getProperty('burnoutWebThres')
             burnoutThrustThres = preferences.general.getProperty('burnoutThrustThres')
             ts = preferences.general.getProperty('timestep')
+            erosive = preferences.general.getProperty('erosive')
+            dx = preferences.general.getProperty('erosive_dx')
 
         else:
             ambientPressure = 101325
             burnoutWebThres = 0.00001
             burnoutThrustThres = 0.1
             ts = 0.01
+            erosive = False
+            dx = 0.1
 
         simRes = simulationResult(self)
 
@@ -152,7 +173,11 @@ class motor():
             perGrainMassFlux = [0 for grain in self.grains]
             for gid, grain in enumerate(self.grains):
                 if grain.getWebLeft(perGrainReg[gid]) > burnoutWebThres:
-                    reg = ts * self.propellant.getProperty('a') * (simRes.channels['pressure'].getLast()**self.propellant.getProperty('n')) # Calculate regression at the current pressure
+                    reg = ts * self.calcSteadyStateBurnRate(simRes) # calculate steady state burn rate
+                    if erosive:
+                        #TODO: iterate over dx for each grain, calcuate r_e
+                        NotImplemented
+
                     perGrainMassFlux[gid] = grain.getPeakMassFlux(mf, ts, perGrainReg[gid], reg, self.propellant.getProperty('density')) # Find the mass flux through the grain based on the mass flow fed into from grains above it
                     perGrainMass[gid] = grain.getVolumeAtRegression(perGrainReg[gid]) * self.propellant.getProperty('density') # Find the mass of the grain after regression
                     mf += (simRes.channels['mass'].getLast()[gid] - perGrainMass[gid]) / ts # Add the change in grain mass to the mass flow

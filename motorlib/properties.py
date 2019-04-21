@@ -54,11 +54,19 @@ class intProperty(property):
         if value >= self.min and value <= self.max:
             super().setValue(value)
 
+
 class stringProperty(property):
     def __init__(self, dispName):
         super().__init__(dispName, '', str)
 
-class propertyCollection():
+
+class boolProperty(property):
+    def __init__(self, dispName, defaultValue):
+        self.default = defaultValue
+        super().__init__(dispName, '', bool)
+
+
+class propertyCollection:
     def __init__(self):
         self.props = {}
 
