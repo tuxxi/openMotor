@@ -68,8 +68,9 @@ class grain(propertyCollection):
         return errors
 
     @abstractmethod
-    def getPortHydraulicDiameter(self, r):
-        """Hydraulic Diameter used for erosive burning calculations"""
+    def getCharacteristicLength(self, r):
+        """Characteristic Length used for erosive burning calculations,
+        see Modified Mukunda & Paul, 10.1016/j.actaastro.2013.07.017 """
 
 
 class perforatedGrain(grain): # A grain with a hole of some shape through the center
@@ -163,7 +164,7 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
     def getRegressionData(self, mapDim, numContours = 15):
         pass
 
-    def getPortHydraulicDiameter(self, r):
+    def getCharacteristicLength(self, r):
         """See Modified Mukunda & Paul, 10.1016/j.actaastro.2013.07.017"""
         return self.getCorePerimeter(r) / np.pi
 

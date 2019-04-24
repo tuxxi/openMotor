@@ -78,18 +78,18 @@ class motor():
 
         return f
 
-    def calcErosiveFraction(self, G, r_0, grain):
+    # TODO: fix magnitude (seems too small?)
+    def calcErosiveFraction(self, G, r_0, reg, grain):
         """Calculate erosive burn rate fraction for some dx of grain
         Based on modified Mukunda and Paul model
-        Erosive fraction is defined r/r_0,
-        therefore total burn rate including erosive fraction is r * r_0
+        Erosive fraction is defined as r/r_0
         """
-        G_in_imperial = units.convert(G, 'kg/(m^2*s)', 'lb/(in^2*s)')
         rho = self.propellant.getProperty('density')
+        # TODO: find actual values of mu. 1e-4 seems to be common
         mu = 1e-4 # self.propellant.getProperty('mu')
-        d_0 = grain.getPortHydraulicDiameter(r_0)
-        Re_0 = rho * r_0 * d_0 / mu # Reynolds' Number.
-        g = (G / (rho * r_0)) * (Re_0 * 1000) ** -0.125 # mass flux ratio modified for size effects
+        d_0 = grain.getCharacteristicLength(reg)
+        Re_0 = rho * r_0 * d_0 / mu                 # Reynolds' Number.
+        g = (G / rho * r_0) * Re_0 ** -0.125        # mass flux ratio modified for size effects
         g_th = 35.0 # mass flux threshold: if g is below this value, no erosive effects are considered
         return 1.0 + 0.023*(g ** 0.8 - g_th ** 0.8) * np.heaviside(g - g_th, 0)
 
@@ -102,7 +102,7 @@ class motor():
             ambientPressure = preferences.general.getProperty('ambPressure')
             burnoutWebThres = preferences.general.getProperty('burnoutWebThres')
             burnoutThrustThres = preferences.general.getProperty('burnoutThrustThres')
-            ts = preferences.general.getProperty('timestep')
+            dt = preferences.general.getProperty('timestep')
             erosive = preferences.general.getProperty('erosive')
             erosive_dx = preferences.general.getProperty('erosive_dx')
 
@@ -110,13 +110,13 @@ class motor():
             ambientPressure = 101325
             burnoutWebThres = 0.00001
             burnoutThrustThres = 0.1
-            ts = 0.01
+            dt = 0.01
             erosive = False
             erosive_dx = 0.001
 
         simRes = simulationResult(self)
 
-        # Checkdx for geometry errors
+        # Check for geometry errors
         if len(self.grains) == 0:
             simRes.addAlert(simAlert(simAlertLevel.ERROR, simAlertType.CONSTRAINT, 'Motor must have at least one propellant grain.', 'Motor'))
         for gid, grain in enumerate(self.grains):
@@ -137,25 +137,25 @@ class motor():
             grain.simulationSetup(preferences)
 
         # Setup initial values
-        perGrainReg = [0 for _ in self.grains]
-
         # At t=0, the motor hasn't yet ignited
         simRes.channels['time'].addData(0)
         simRes.channels['kn'].addData(0)
         simRes.channels['pressure'].addData(0)
         simRes.channels['force'].addData(0)
-        simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density') for grain in self.grains])
-        simRes.channels['massFlow'].addData([0 for grain in self.grains])
-        simRes.channels['massFlux'].addData([0 for grain in self.grains])
+        simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density')
+                                         for grain in self.grains])
+        simRes.channels['massFlow'].addData([0 for _ in self.grains])
+        simRes.channels['massFlux'].addData([0 for _ in self.grains])
 
         # At t = ts, the motor has ignited
-        simRes.channels['time'].addData(ts)
-        simRes.channels['kn'].addData(self.calcKN(perGrainReg, burnoutWebThres))
-        simRes.channels['pressure'].addData(self.calcIdealPressure(perGrainReg, None, burnoutWebThres))
-        simRes.channels['force'].addData(self.calcForce(perGrainReg, None, ambientPressure, burnoutWebThres))
-        simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density') for grain in self.grains])
-        simRes.channels['massFlow'].addData([0 for grain in self.grains])
-        simRes.channels['massFlux'].addData([0 for grain in self.grains])
+        simRes.channels['time'].addData(dt)
+        simRes.channels['kn'].addData(self.calcKN([0 for _ in self.grains], burnoutWebThres))
+        simRes.channels['pressure'].addData(self.calcIdealPressure([0 for _ in self.grains], None, burnoutWebThres))
+        simRes.channels['force'].addData(self.calcForce([0 for _ in self.grains], None, ambientPressure, burnoutWebThres))
+        simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density')
+                                         for grain in self.grains])
+        simRes.channels['massFlow'].addData([0 for _ in self.grains])
+        simRes.channels['massFlux'].addData([0 for _ in self.grains])
 
         # Check port/throat ratio and add a warning if it is large enough
         aftPort = self.grains[-1].getPortArea(0)
@@ -166,65 +166,69 @@ class motor():
                 desc = 'Initial port/throat ratio of ' + str(round(ratio, 3)) + ' was less than ' + str(minAllowed)
                 simRes.addAlert(simAlert(simAlertLevel.WARNING, simAlertType.CONSTRAINT, desc, 'N/A'))
 
-        # Perform timesteps
-        while simRes.channels['force'].getLast() > burnoutThrustThres * 0.01 * simRes.channels['force'].getMax(): # 0.01 to convert to a percentage
-            mf = 0
+        # per grain regressions:
+        perGrainReg = [0 for _ in self.grains]
+        prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
+
+        # Perform timesteps until thrust is below thrust threshold percentage
+        while simRes.channels['force'].getLast() > burnoutThrustThres * 0.01 * simRes.channels['force'].getMax():
+            totalMassFlow = 0
             perGrainMass = [0 for _ in self.grains]
             perGrainMassFlow = [0 for _ in self.grains]
             perGrainMassFlux = [0 for _ in self.grains]
 
-            prev_rates = {} # erosive burn rate of previous time step, per dx
+            r_0 = self.calcSteadyStateBurnRate(simRes)  # steady state burn rate
+            reg = r_0 * dt
 
             for gid, grain in enumerate(self.grains):
-                if grain.getWebLeft(perGrainReg[gid]) > burnoutWebThres:
-                    r_0 = ts * self.calcSteadyStateBurnRate(simRes) # steady state regression for this time step
+                if grain.getWebLeft(perGrainReg[gid]) > burnoutWebThres: # grain has not burned out yet.
 
                     if erosive:
                         len_ = grain.getProperty('length')
                         # per dx regressions: one total regression for each dx
-                        perDxRegressions = [r_0 for _ in np.linspace(0, len_, len_/erosive_dx + 1)]
+                        perDxRegressions = [reg for _ in np.linspace(0, len_, len_/erosive_dx + 1)]
                         # mass flux for previous dx
                         perDxMassFlux = [0 for _ in np.linspace(0, len_, len_/erosive_dx + 1)]
 
-                        # in order to calculate the total mass flux and regression for the grain, we split it into
-                        # sections and iterate, stepping down by each dx every time to reach
-                        # a new "section".
-                        # note that this is very slow!
+                        # to calculate the total mass flux and regression for the grain, we split it into
+                        # sections and iterate, stepping down by length dx and calculating mass flux and regression for
+                        # each section.
+                        # note that this is _very_ slow!
                         for idx, dx in enumerate(np.linspace(0, len_, len_/erosive_dx + 1)):
 
                             # get total regression for this dx
                             total_reg = perDxRegressions[idx]
                             # get previous burn rate for this dx
-                            prev_rate = prev_rates.get(idx, r_0)
+                            prev_rate = prev_rates[gid].get(idx, r_0)
 
-                            perDxMassFlux[idx] = grain.getMassFlux(mf, ts, total_reg, prev_rate, dx,
+                            perDxMassFlux[idx] = grain.getMassFlux(totalMassFlow, dt, total_reg, prev_rate * dt, dx,
                                                                    self.propellant.getProperty('density'), erosive_dx)
 
                             # update mass flow
-                            mf += grain.getFaceArea(total_reg) * erosive_dx * self.propellant.getProperty('density')
+                            totalMassFlow += grain.getFaceArea(total_reg) * erosive_dx * self.propellant.getProperty('density')
 
                             # update regression with the erosive rate
-                            n_e = self.calcErosiveFraction(perDxMassFlux[idx], r_0, grain)  # erosive burn fraction
-                            r_e = r_0 * n_e  # r = r_0 * n_e
-                            perDxRegressions[idx] += r_e
-                            prev_rates[idx] = r_e
+                            n_e = self.calcErosiveFraction(perDxMassFlux[idx], r_0, total_reg, grain)  # erosive burn fraction
+                            r_tot = r_0 * n_e  # r = r_0 * n_e
+                            perDxRegressions[idx] += r_tot * dt
+                            prev_rates[gid][idx] = r_tot
 
-                        massflux = perDxMassFlux[-1]
+                        perGrainMassFlux[gid] = perDxMassFlux[-1]       # per-grain mass flux will be at aft of grain
+                        perGrainReg[gid] += np.mean(perDxRegressions) / 2  # Apply the _average_ regression
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
-                        massflux = grain.getPeakMassFlux(mf, ts, perGrainReg[gid], r_0,
+                        perGrainMassFlux[gid] = grain.getPeakMassFlux(totalMassFlow, dt, perGrainReg[gid], reg,
                                                          self.propellant.getProperty('density'))
+                        # update per-motor params
+                        perGrainReg[gid] += reg  # Apply the regression
 
-                    perGrainMassFlux[gid] = massflux
-                    perGrainMass[gid] = grain.getVolumeAtRegression(perGrainReg[gid]) * self.propellant.getProperty('density') # Find the mass of the grain after regression
-                    mf += (simRes.channels['mass'].getLast()[gid] - perGrainMass[gid]) / ts # Add the change in grain mass to the mass flow
+                        totalMassFlow += (simRes.channels['mass'].getLast()[gid] - perGrainMass[gid]) * dt # Add the change in grain mass to the mass flow
 
-                    perGrainReg[gid] += r_0 # Apply the regression
+                perGrainMass[gid] = grain.getVolumeAtRegression(perGrainReg[gid]) * self.propellant.getProperty('density')  # Find the mass of the grain after regression
+                perGrainMassFlow[gid] = totalMassFlow
 
-                perGrainMassFlow[gid] = mf
-
-            # regression finished, add data points;
+            # add data points to simulation result:
             simRes.channels['mass'].addData(perGrainMass)
             simRes.channels['massFlow'].addData(perGrainMassFlow)
             simRes.channels['massFlux'].addData(perGrainMassFlux)
@@ -238,20 +242,21 @@ class motor():
             # Calculate force
             simRes.channels['force'].addData(self.calcForce(perGrainReg, simRes.channels['pressure'].getLast(), ambientPressure, burnoutWebThres))
 
-            simRes.channels['time'].addData(simRes.channels['time'].getLast() + ts)
+            simRes.channels['time'].addData(simRes.channels['time'].getLast() + dt)
 
             if callback is not None:
-                progress = max([g.getWebLeft(r) / g.getWebLeft(0) for g,r in zip(self.grains, perGrainReg)]) # Grain with the largest percentage of its web left
+                progress = max([g.getWebLeft(r) / g.getWebLeft(0) for g, r in zip(self.grains, perGrainReg)]) # Grain with the largest percentage of its web left
                 if callback(1 - progress): # If the callback returns true, it is time to cancel
                     return simRes
 
-        simRes.channels['time'].addData(simRes.channels['time'].getLast() + ts)
+        # simulation finished, add final zero data points.
+        simRes.channels['time'].addData(simRes.channels['time'].getLast() + dt)
         simRes.channels['kn'].addData(0)
         simRes.channels['pressure'].addData(0)
         simRes.channels['force'].addData(0)
         simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density') for grain in self.grains])
-        simRes.channels['massFlow'].addData([0 for grain in self.grains])
-        simRes.channels['massFlux'].addData([0 for grain in self.grains])
+        simRes.channels['massFlow'].addData([0 for _ in self.grains])
+        simRes.channels['massFlux'].addData([0 for _ in self.grains])
 
         simRes.success = True
 
