@@ -130,21 +130,24 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
         uncored = geometry.circleArea(self.props['diameter'].getValue())
         return uncored - faceArea
 
-    def getMassFlux(self, massIn, dt, r, dr, position, density): # This duplicates a lot of code from bates. Time to make bates a perforated grain?
+    def getMassFlux(self, massIn, dt, r, dr, position, density, dx=None): # This duplicates a lot of code from bates. Time to make bates a perforated grain?
         diameter = self.props['diameter'].getValue()
 
-        bLength = self.getRegressedLength(r)
-        endPos = self.getEndPositions(r)
+        topPos, bottomPos = self.getEndPositions(r)
 
-        if position < endPos[0]: # If a position above the top face is queried, the mass flow is just the input mass and the diameter is the casting tube
+        if position < topPos: # If a position above the top face is queried, the mass flow is just the input mass and the diameter is the casting tube
             return massIn / geometry.circleArea(diameter)
-        elif position <= endPos[1]: # If a position in the grain is queried, the mass flow is the input mass, from the top face, and from the tube up to the point. The diameter is the core.
+        elif position <= bottomPos: # If a position in the grain is queried, the mass flow is the input mass, from the top face, and from the tube up to the point. The diameter is the core.
             if self.props['inhibitedEnds'].getValue() == 'Top': # Top inhibited
                 top = 0
                 countedCoreLength = position
             else:
                 top = self.getFaceArea(r + dr) * dr * density
-                countedCoreLength = position - (endPos[0] + dr)
+                countedCoreLength = position - (topPos + dr)
+
+            if dx is not None:  # if we entered a "dx" length, only count the mass flux from position to pos+dx
+                countedCoreLength = dx
+
             core = ((self.getPortArea(r + (dr * 10)) * countedCoreLength) - (self.getPortArea(r) * countedCoreLength)) * density / 10 # The factor of ten is to compensate for lower resolution maps
             mf = massIn + ((top + core) / dt)
             return mf / self.getPortArea(r + dr)

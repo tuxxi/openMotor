@@ -61,8 +61,8 @@ class stringProperty(property):
 
 
 class boolProperty(property):
-    def __init__(self, dispName, defaultValue):
-        self.default = defaultValue
+    def __init__(self, dispName, value):
+        self.value = value
         super().__init__(dispName, '', bool)
 
 

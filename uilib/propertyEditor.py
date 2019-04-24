@@ -2,8 +2,9 @@ import motorlib
 
 import math
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLineEdit
-from PyQt5.QtWidgets import QDoubleSpinBox, QSpinBox, QComboBox
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox
+)
 from PyQt5.QtCore import pyqtSignal
 
 class propertyEditor(QWidget):
@@ -62,6 +63,12 @@ class propertyEditor(QWidget):
 
             self.layout().addWidget(self.editor)
 
+        elif type(prop) is motorlib.boolProperty:
+            self.editor = QCheckBox()
+
+            self.editor.setChecked(True if self.prop.value else False)
+            self.layout().addWidget(self.editor)
+
     def getValue(self):
         if type(self.prop) is motorlib.floatProperty:
             return motorlib.convert(self.editor.value(), self.dispUnit, self.prop.unit)
@@ -74,3 +81,6 @@ class propertyEditor(QWidget):
 
         elif type(self.prop) is motorlib.enumProperty:
             return self.editor.currentText()
+
+        elif type(self.prop) is motorlib.boolProperty:
+            return True if self.editor.isChecked() else False
