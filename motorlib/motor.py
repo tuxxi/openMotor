@@ -88,8 +88,9 @@ class motor():
         # TODO: find actual values of mu. 1e-4 seems to be common
         mu = 1e-4 # self.propellant.getProperty('mu')
         d_0 = grain.getCharacteristicLength(reg)
-        Re_0 = rho * r_0 * d_0 / mu                 # Reynolds' Number.
-        g = (G / rho * r_0) * Re_0 ** -0.125        # mass flux ratio modified for size effects
+        Re_0 = (rho * r_0 * d_0) / mu                 # Reynolds' Number.
+        g_0 = G / (rho * r_0)           # mass flux ratio
+        g = g_0 * (Re_0 / 1000) ** -0.125         # modified for size effects
         g_th = 35.0 # mass flux threshold: if g is below this value, no erosive effects are considered
         return 1.0 + 0.023*(g ** 0.8 - g_th ** 0.8) * np.heaviside(g - g_th, 0)
 
@@ -166,8 +167,7 @@ class motor():
                 desc = 'Initial port/throat ratio of ' + str(round(ratio, 3)) + ' was less than ' + str(minAllowed)
                 simRes.addAlert(simAlert(simAlertLevel.WARNING, simAlertType.CONSTRAINT, desc, 'N/A'))
 
-        # per grain regressions:
-        perGrainReg = [0 for _ in self.grains]
+        perGrainReg = [0 for _ in self.grains] # total regression per grain
         prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
 
         # Perform timesteps until thrust is below thrust threshold percentage
@@ -185,45 +185,47 @@ class motor():
 
                     if erosive:
                         len_ = grain.getProperty('length')
-                        # per dx regressions: one total regression for each dx
-                        perDxRegressions = [reg for _ in np.linspace(0, len_, len_/erosive_dx + 1)]
-                        # mass flux for previous dx
-                        perDxMassFlux = [0 for _ in np.linspace(0, len_, len_/erosive_dx + 1)]
+                        num_points = len_ / erosive_dx
+
+                        # one regression for each dx, per grain.
+                        perDxRegressions = [[0 for _ in np.linspace(0, len_, num_points + 1)] for _ in self.grains]
 
                         # to calculate the total mass flux and regression for the grain, we split it into
                         # sections and iterate, stepping down by length dx and calculating mass flux and regression for
                         # each section.
                         # note that this is _very_ slow!
-                        for idx, dx in enumerate(np.linspace(0, len_, len_/erosive_dx + 1)):
+                        erosiveMF = 0
+                        for idx, dx in enumerate(np.linspace(0, len_, num_points + 1)):
 
-                            # get total regression for this dx
-                            total_reg = perDxRegressions[idx]
-                            # get previous burn rate for this dx
+                            total_reg = perDxRegressions[gid][idx]
                             prev_rate = prev_rates[gid].get(idx, r_0)
 
-                            perDxMassFlux[idx] = grain.getMassFlux(totalMassFlow, dt, total_reg, prev_rate * dt, dx,
+                            nonErosiveMF = grain.getMassFlux(totalMassFlow, dt, total_reg, r_0 * dt, dx,
+                                                                   self.propellant.getProperty('density'), erosive_dx)
+                            erosiveMF = grain.getMassFlux(totalMassFlow, dt, total_reg, prev_rate * dt, dx,
                                                                    self.propellant.getProperty('density'), erosive_dx)
 
-                            # update mass flow
-                            totalMassFlow += grain.getFaceArea(total_reg) * erosive_dx * self.propellant.getProperty('density')
+                            # scale burning SA to only this length dx
+                            BurningSA = grain.getSurfaceAreaAtRegression(total_reg) / num_points
+                            totalMassFlow += BurningSA * self.propellant.getProperty('density') * prev_rate
 
                             # update regression with the erosive rate
-                            n_e = self.calcErosiveFraction(perDxMassFlux[idx], r_0, total_reg, grain)  # erosive burn fraction
+                            n_e = self.calcErosiveFraction(nonErosiveMF, r_0, total_reg, grain)  # erosive burn fraction
+
                             r_tot = r_0 * n_e  # r = r_0 * n_e
-                            perDxRegressions[idx] += r_tot * dt
+                            perDxRegressions[gid][idx] += r_tot * dt
                             prev_rates[gid][idx] = r_tot
 
-                        perGrainMassFlux[gid] = perDxMassFlux[-1]       # per-grain mass flux will be at aft of grain
-                        perGrainReg[gid] += np.mean(perDxRegressions) / 2  # Apply the _average_ regression
+                        perGrainMassFlux[gid] = erosiveMF # per-grain mass flux will be at aft of grain
+                        perGrainReg[gid] += perDxRegressions[gid][-1] # Apply the reg at the aft of the grain
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
                         perGrainMassFlux[gid] = grain.getPeakMassFlux(totalMassFlow, dt, perGrainReg[gid], reg,
                                                          self.propellant.getProperty('density'))
-                        # update per-motor params
                         perGrainReg[gid] += reg  # Apply the regression
 
-                        totalMassFlow += (simRes.channels['mass'].getLast()[gid] - perGrainMass[gid]) * dt # Add the change in grain mass to the mass flow
+                        totalMassFlow += grain.getSurfaceAreaAtRegression(reg) * self.propellant.getProperty('density') * r_0
 
                 perGrainMass[gid] = grain.getVolumeAtRegression(perGrainReg[gid]) * self.propellant.getProperty('density')  # Find the mass of the grain after regression
                 perGrainMassFlow[gid] = totalMassFlow

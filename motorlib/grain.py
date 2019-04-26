@@ -131,7 +131,7 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
         uncored = geometry.circleArea(self.props['diameter'].getValue())
         return uncored - faceArea
 
-    def getMassFlux(self, massIn, dt, r, dr, position, density, dx=None): # This duplicates a lot of code from bates. Time to make bates a perforated grain?
+    def getMassFlux(self, massIn, dt, r, dr, position, density, length=None): # This duplicates a lot of code from bates. Time to make bates a perforated grain?
         diameter = self.props['diameter'].getValue()
 
         topPos, bottomPos = self.getEndPositions(r)
@@ -146,8 +146,8 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
                 top = self.getFaceArea(r + dr) * dr * density
                 countedCoreLength = position - (topPos + dr)
 
-            if dx is not None:  # if we entered a "dx" length, only count the mass flux from position to pos+dx
-                countedCoreLength = dx
+            if length is not None:  # if we entered a "dx" length, only count the mass flux from position to pos+dx
+                countedCoreLength = length
 
             core = ((self.getPortArea(r + (dr * 10)) * countedCoreLength) - (self.getPortArea(r) * countedCoreLength)) * density / 10 # The factor of ten is to compensate for lower resolution maps
             mf = massIn + ((top + core) / dt)
