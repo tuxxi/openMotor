@@ -1,7 +1,6 @@
 import yaml
 
 from PyQt5.QtWidgets import QDialog, QLabel
-from PyQt5.uic import loadUi
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from motorlib import propertyCollection, floatProperty, enumProperty
@@ -10,7 +9,8 @@ from motorlib import propellant
 
 from . import collectionEditor
 from . import defaultPropellants
-from . import loadFile, saveFile, fileTypes
+from . import loadFile, saveFile, fileTypes, getConfigPath
+
 
 class propellantManager(QObject):
 
@@ -26,7 +26,7 @@ class propellantManager(QObject):
 
     def loadPropellants(self):
         try:
-            propList = loadFile('propellants.yaml', fileTypes.PROPELLANTS)
+            propList = loadFile(getConfigPath() + 'propellants.yaml', fileTypes.PROPELLANTS)
             for propDict in propList:
                 newProp = propellant()
                 newProp.setProperties(propDict)
@@ -37,7 +37,7 @@ class propellantManager(QObject):
 
     def savePropellants(self):
         try:
-            saveFile('propellants.yaml', [prop.getProperties() for prop in self.propellants], fileTypes.PROPELLANTS)
+            saveFile(getConfigPath() + 'propellants.yaml', [prop.getProperties() for prop in self.propellants], fileTypes.PROPELLANTS)
         except:
             print('Unable to save propellants!')
 
@@ -52,7 +52,7 @@ class propellantManager(QObject):
         self.propMenu.show()
 
     def setPreferences(self, pref):
-        self.propMenu.propEditor.setPreferences(pref)
+        self.propMenu.ui.propEditor.setPreferences(pref)
 
 class propellantMenu(QDialog):
 
@@ -60,20 +60,23 @@ class propellantMenu(QDialog):
     closed = pyqtSignal()
 
     def __init__(self, manager):
+        from .views.PropMenu_ui import Ui_PropellantDialog
+
         QDialog.__init__(self)
-        loadUi("resources/PropMenu.ui", self)
+        self.ui = Ui_PropellantDialog()
+        self.ui.setupUi(self)
 
         self.manager = manager
 
         self.setupPropList()
-        self.listWidgetPropellants.currentItemChanged.connect(self.propSelected)
+        self.ui.listWidgetPropellants.currentItemChanged.connect(self.propSelected)
 
-        self.propEditor.changeApplied.connect(self.propEdited)
-        self.propEditor.closed.connect(self.editorClosed)
+        self.ui.propEditor.changeApplied.connect(self.propEdited)
+        self.ui.propEditor.closed.connect(self.editorClosed)
 
-        self.pushButtonNewPropellant.pressed.connect(self.newPropellant)
-        self.pushButtonDelete.pressed.connect(self.deleteProp)
-        self.pushButtonEdit.pressed.connect(self.editProp)
+        self.ui.pushButtonNewPropellant.pressed.connect(self.newPropellant)
+        self.ui.pushButtonDelete.pressed.connect(self.deleteProp)
+        self.ui.pushButtonEdit.pressed.connect(self.editProp)
 
         self.setupButtons()
 
@@ -82,12 +85,12 @@ class propellantMenu(QDialog):
         super().show()
 
     def setupButtons(self):
-        self.pushButtonEdit.setEnabled(False)
-        self.pushButtonDelete.setEnabled(False)
+        self.ui.pushButtonEdit.setEnabled(False)
+        self.ui.pushButtonDelete.setEnabled(False)
 
     def setupPropList(self):
-        self.listWidgetPropellants.clear()
-        self.listWidgetPropellants.addItems(self.manager.getNames())
+        self.ui.listWidgetPropellants.clear()
+        self.ui.listWidgetPropellants.addItems(self.manager.getNames())
 
     def newPropellant(self):
         propName = "New Propellant"
@@ -104,44 +107,44 @@ class propellantMenu(QDialog):
         self.manager.savePropellants()
 
     def deleteProp(self):
-        del self.manager.propellants[self.listWidgetPropellants.currentRow()]
+        del self.manager.propellants[self.ui.listWidgetPropellants.currentRow()]
         self.manager.savePropellants()
         self.setupPropList()
         self.setupButtons()
 
     def editProp(self):
-        prop = self.manager.propellants[self.listWidgetPropellants.currentRow()]
-        self.propEditor.loadProperties(prop)
+        prop = self.manager.propellants[self.ui.listWidgetPropellants.currentRow()]
+        self.ui.propEditor.loadProperties(prop)
         self.toggleButtons(True)
 
     def propEdited(self, propDict):
         propNames = self.manager.getNames()
         if propDict['name'] in propNames:
-            if propNames.index(propDict['name']) != self.listWidgetPropellants.currentRow():
+            if propNames.index(propDict['name']) != self.ui.listWidgetPropellants.currentRow():
                 print("Can't duplicate a prop name!")
                 return
-        self.manager.propellants[self.listWidgetPropellants.currentRow()].setProperties(propDict)
+        self.manager.propellants[self.ui.listWidgetPropellants.currentRow()].setProperties(propDict)
         self.setupPropList()
         self.manager.savePropellants()
 
     def propSelected(self):
-        self.pushButtonEdit.setEnabled(True)
-        self.pushButtonDelete.setEnabled(True)
+        self.ui.pushButtonEdit.setEnabled(True)
+        self.ui.pushButtonDelete.setEnabled(True)
 
     def editorClosed(self):
         self.toggleButtons(False)
 
     def toggleButtons(self, editing):
-        self.listWidgetPropellants.setEnabled(not editing)
-        self.pushButtonNewPropellant.setEnabled(not editing)
-        self.pushButtonEdit.setEnabled(not editing)
-        self.pushButtonDelete.setEnabled(not editing)
-        self.buttonBox.setEnabled(not editing)
+        self.ui.listWidgetPropellants.setEnabled(not editing)
+        self.ui.pushButtonNewPropellant.setEnabled(not editing)
+        self.ui.pushButtonEdit.setEnabled(not editing)
+        self.ui.pushButtonDelete.setEnabled(not editing)
+        self.ui.buttonBox.setEnabled(not editing)
 
     def close(self):
         super().close()
         self.toggleButtons(False)
-        self.propEditor.cleanup()
+        self.ui.propEditor.cleanup()
         self.closed.emit()
 
 class propellantEditor(collectionEditor):
@@ -152,7 +155,7 @@ class propellantEditor(collectionEditor):
         self.labelCStar.hide()
         self.stats.addWidget(self.labelCStar)
 
-    def update(self):
+    def propertyUpdate(self):
         k = self.propertyEditors['k'].getValue()
         t = self.propertyEditors['t'].getValue()
         m = self.propertyEditors['m'].getValue()

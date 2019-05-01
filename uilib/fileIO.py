@@ -1,7 +1,11 @@
 import yaml
+import platform
+import os
+import appdirs
 from enum import Enum
 
 appVersion = (0, 1, 0)
+appVersionStr = '.'.join(map(str, appVersion))
 
 class fileTypes(Enum):
     PREFERENCES = 1
@@ -40,3 +44,12 @@ def loadFile(path, dataType):
                 raise ValueError("Data is from a future version (" + new + " vs " + old + ") and can't be loaded.")
             else: # Otherwise it is from a past version and will be migrated
                 pass # Migrate file, will be implemented later
+
+def getConfigPath(): # Returns the path that files like preferences and propellant library should be in
+    if platform.system() == 'Darwin': # On OSX, the configuration files should live in the library
+        path = appdirs.user_data_dir('openMotor', 'openMotor')
+        if not os.path.isdir(path): # Create directory if it doesn't exist
+            os.mkdir(path)
+        return path + '/'
+    else: # On other platforms they can live in this directory
+        return ''
