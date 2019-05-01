@@ -1,13 +1,10 @@
-from . import grain
 from . import grainTypes
 from . import nozzle
 from . import propellant
 from . import geometry
-from . import units
 from . import simulationResult, simAlert, simAlertLevel, simAlertType
 from . import endBurningGrain
 
-import math
 import numpy as np
 
 class motor():
@@ -32,7 +29,7 @@ class motor():
             self.grains[-1].setProperties(entry['properties'])
 
     def calcKN(self, r, burnoutWebThres = 0.00001):
-        surfArea = sum([gr.getSurfaceAreaAtRegression(reg) * int(gr.isWebLeft(reg, burnoutWebThres)) for gr, reg in zip(self.grains, r)])
+        surfArea = np.sum([gr.getSurfaceAreaAtRegression(reg) * int(gr.isWebLeft(reg, burnoutWebThres)) for gr, reg in zip(self.grains, r)])
         nozz = self.nozzle.getThroatArea()
         return surfArea / nozz
 
@@ -82,17 +79,17 @@ class motor():
     def calcErosiveFraction(self, G, r_0, reg, grain):
         """Calculate erosive burn rate fraction for some dx of grain
         Based on modified Mukunda and Paul model
-        Erosive fraction is defined as r/r_0
+        Erosive fraction is defined as r/r_0, where r is total burn rate, r_0 is steady-state burn rate
         """
         rho = self.propellant.getProperty('density')
         # TODO: find actual values of mu. 1e-4 seems to be common
         mu = 1e-4 # self.propellant.getProperty('mu')
         d_0 = grain.getCharacteristicLength(reg)
-        Re_0 = (rho * r_0 * d_0) / mu                 # Reynolds' Number.
-        g_0 = G / (rho * r_0)           # mass flux ratio
-        g = g_0 * (Re_0 / 1000) ** -0.125         # modified for size effects
+        Re_0 = (rho * r_0 * d_0) / mu           # Reynolds' Number.
+        g_0 = G / (rho * r_0)                   # mass flux ratio
+        g = g_0 * (Re_0 / 1000)**-0.125         # modified for size effects
         g_th = 35.0 # mass flux threshold: if g is below this value, no erosive effects are considered
-        return 1.0 + 0.023*(g ** 0.8 - g_th ** 0.8) * np.heaviside(g - g_th, 0)
+        return 1.0 + 0.023*(g**0.8 - g_th**0.8) * np.heaviside(g-g_th, 0)
 
     def calcSteadyStateBurnRate(self, simRes):
         # r = aP**n
@@ -187,17 +184,18 @@ class motor():
                         len_ = grain.getProperty('length')
                         num_points = len_ / erosive_dx
 
-                        # one regression for each dx, per grain.
-                        perDxRegressions = [[0 for _ in np.linspace(0, len_, num_points + 1)] for _ in self.grains]
+                        # one regression for each dx for this grain
+                        perDxRegressions = [0 for _ in np.linspace(0, len_, num_points + 1)]
+                        # "erosive" mass flux for this grain
+                        erosiveMF = 0
 
                         # to calculate the total mass flux and regression for the grain, we split it into
                         # sections and iterate, stepping down by length dx and calculating mass flux and regression for
                         # each section.
                         # note that this is _very_ slow!
-                        erosiveMF = 0
                         for idx, dx in enumerate(np.linspace(0, len_, num_points + 1)):
 
-                            total_reg = perDxRegressions[gid][idx]
+                            total_reg = perDxRegressions[idx]
                             prev_rate = prev_rates[gid].get(idx, r_0)
 
                             nonErosiveMF = grain.getMassFlux(totalMassFlow, dt, total_reg, r_0 * dt, dx,
@@ -213,11 +211,11 @@ class motor():
                             n_e = self.calcErosiveFraction(nonErosiveMF, r_0, total_reg, grain)  # erosive burn fraction
 
                             r_tot = r_0 * n_e  # r = r_0 * n_e
-                            perDxRegressions[gid][idx] += r_tot * dt
+                            perDxRegressions[idx] += r_tot * dt
                             prev_rates[gid][idx] = r_tot
 
                         perGrainMassFlux[gid] = erosiveMF # per-grain mass flux will be at aft of grain
-                        perGrainReg[gid] += perDxRegressions[gid][-1] # Apply the reg at the aft of the grain
+                        perGrainReg[gid] += np.mean(perDxRegressions) # apply the reg at the aft end of the grain
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
@@ -247,7 +245,7 @@ class motor():
             simRes.channels['time'].addData(simRes.channels['time'].getLast() + dt)
 
             if callback is not None:
-                progress = max([g.getWebLeft(r) / g.getWebLeft(0) for g, r in zip(self.grains, perGrainReg)]) # Grain with the largest percentage of its web left
+                progress = np.max([g.getWebLeft(r) / g.getWebLeft(0) for g, r in zip(self.grains, perGrainReg)]) # Grain with the largest percentage of its web left
                 if callback(1 - progress): # If the callback returns true, it is time to cancel
                     return simRes
 
