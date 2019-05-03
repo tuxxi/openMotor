@@ -7,6 +7,7 @@ from . import endBurningGrain
 
 import numpy as np
 
+
 class motor():
     def __init__(self):
         self.grains = []
@@ -164,8 +165,10 @@ class motor():
                 desc = 'Initial port/throat ratio of ' + str(round(ratio, 3)) + ' was less than ' + str(minAllowed)
                 simRes.addAlert(simAlert(simAlertLevel.WARNING, simAlertType.CONSTRAINT, desc, 'N/A'))
 
-        perGrainReg = [0 for _ in self.grains] # total regression per grain
+        perGrainReg = [0 for _ in self.grains]  # total regression per grain: for non-erosive use
+
         prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
+        perDxRegressions = [{} for _ in self.grains]  # total regression: per grain, per dx
 
         # Perform timesteps until thrust is below thrust threshold percentage
         while simRes.channels['force'].getLast() > burnoutThrustThres * 0.01 * simRes.channels['force'].getMax():
@@ -177,6 +180,7 @@ class motor():
             r_0 = self.calcSteadyStateBurnRate(simRes)  # steady state burn rate
             reg = r_0 * dt
 
+            # calculate regression and other per-grain parameters
             for gid, grain in enumerate(self.grains):
                 if grain.getWebLeft(perGrainReg[gid]) > burnoutWebThres: # grain has not burned out yet.
 
@@ -184,43 +188,43 @@ class motor():
                         len_ = grain.getProperty('length')
                         num_points = len_ / erosive_dx
 
-                        # one regression for each dx for this grain
-                        perDxRegressions = [0 for _ in np.linspace(0, len_, num_points + 1)]
-                        # "erosive" mass flux for this grain
-                        erosiveMF = 0
-
+                        nonErosiveMFs = [0 for _ in range(int(num_points) + 1)]
                         # to calculate the total mass flux and regression for the grain, we split it into
                         # sections and iterate, stepping down by length dx and calculating mass flux and regression for
                         # each section.
                         # note that this is _very_ slow!
                         for idx, dx in enumerate(np.linspace(0, len_, num_points + 1)):
+                            if idx not in perDxRegressions[gid]:
+                                perDxRegressions[gid][idx] = 0
 
-                            total_reg = perDxRegressions[idx]
+                            prev_reg = perDxRegressions[gid][idx]
                             prev_rate = prev_rates[gid].get(idx, r_0)
 
-                            nonErosiveMF = grain.getMassFlux(totalMassFlow, dt, total_reg, r_0 * dt, dx,
-                                                                   self.propellant.getProperty('density'), erosive_dx)
-                            erosiveMF = grain.getMassFlux(totalMassFlow, dt, total_reg, prev_rate * dt, dx,
-                                                                   self.propellant.getProperty('density'), erosive_dx)
+                            nonErosiveMFs[idx] = grain.getMassFlux(totalMassFlow, dt, prev_reg, reg, dx,
+                                                                   self.propellant.getProperty('density'))
 
                             # scale burning SA to only this length dx
-                            BurningSA = grain.getSurfaceAreaAtRegression(total_reg) / num_points
+                            BurningSA = grain.getSurfaceAreaAtRegression(prev_reg) / num_points
                             totalMassFlow += BurningSA * self.propellant.getProperty('density') * prev_rate
 
-                            # update regression with the erosive rate
-                            n_e = self.calcErosiveFraction(nonErosiveMF, r_0, total_reg, grain)  # erosive burn fraction
+                            n_e = self.calcErosiveFraction(nonErosiveMFs[idx], r_0, prev_reg, grain)  # erosive burn fraction
+                            # if n_e > 1.0:
+                            #     print(f"grain :{gid} has mass flux: {nonErosiveMF}, n_e: {n_e} at time: {simRes.channels['time'].getLast()}")
 
                             r_tot = r_0 * n_e  # r = r_0 * n_e
-                            perDxRegressions[idx] += r_tot * dt
+                            perDxRegressions[gid][idx] += r_tot * dt
                             prev_rates[gid][idx] = r_tot
 
-                        perGrainMassFlux[gid] = erosiveMF # per-grain mass flux will be at aft of grain
-                        perGrainReg[gid] += np.mean(perDxRegressions) # apply the reg at the aft end of the grain
+                        regs = list(perDxRegressions[gid].values())
+                        perGrainMassFlux[gid] = np.max(nonErosiveMFs) # per-grain mass flux will be at aft of grain
+                        perGrainReg[gid] = np.mean(regs) # TODO: replace with something less hack-y
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
                         perGrainMassFlux[gid] = grain.getPeakMassFlux(totalMassFlow, dt, perGrainReg[gid], reg,
                                                          self.propellant.getProperty('density'))
+                        print(f"grain :{gid} has mass flux: {perGrainMassFlux[gid]} at time: {simRes.channels['time'].getLast()}")
+
                         perGrainReg[gid] += reg  # Apply the regression
 
                         totalMassFlow += grain.getSurfaceAreaAtRegression(reg) * self.propellant.getProperty('density') * r_0
@@ -228,7 +232,7 @@ class motor():
                 perGrainMass[gid] = grain.getVolumeAtRegression(perGrainReg[gid]) * self.propellant.getProperty('density')  # Find the mass of the grain after regression
                 perGrainMassFlow[gid] = totalMassFlow
 
-            # add data points to simulation result:
+            # add data points to simulation result
             simRes.channels['mass'].addData(perGrainMass)
             simRes.channels['massFlow'].addData(perGrainMassFlow)
             simRes.channels['massFlux'].addData(perGrainMassFlux)

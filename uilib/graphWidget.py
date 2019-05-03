@@ -4,7 +4,8 @@ matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-import motorlib
+import numpy as np
+
 
 class graphWidget(FigureCanvas):
     def __init__(self, parent):
@@ -32,10 +33,12 @@ class graphWidget(FigureCanvas):
 
         pressureUnit = self.preferences.getUnit('Pa')
         forceUnit = self.preferences.getUnit('N')
+        massFluxUnit = self.preferences.getUnit('kg/(m^2*s)')
         self.plot.plot(simResult.channels['time'].getData(), simResult.channels['kn'].getData())
         self.plot.plot(simResult.channels['time'].getData(), simResult.channels['pressure'].getData(pressureUnit))
         self.plot.plot(simResult.channels['time'].getData(), simResult.channels['force'].getData(forceUnit))
-        self.plot.legend(["Kn", "Pressure - " + pressureUnit, "Force - " + forceUnit])
+        self.plot.plot(simResult.channels['time'].getData(), np.transpose(simResult.channels['massFlux'].getData())[-1])
+        self.plot.legend(["Kn", "Pressure - " + pressureUnit, "Force - " + forceUnit, "Mass Flux - " + massFluxUnit])
         self.draw()
 
     def resetPlot(self):
