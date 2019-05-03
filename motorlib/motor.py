@@ -34,7 +34,7 @@ class motor():
         nozz = self.nozzle.getThroatArea()
         return surfArea / nozz
 
-    def calcIdealPressure(self, r, kn = None, burnoutWebThres = 0.00001):
+    def calcIdealPressure(self, r, kn = None, burnoutWebThres = 0.00001, burnrate=None):
         k = self.propellant.getProperty('k')
         t = self.propellant.getProperty('t')
         m = self.propellant.getProperty('m')
@@ -43,10 +43,18 @@ class motor():
         n = self.propellant.getProperty('n')
         if kn is None:
             kn = self.calcKN(r, burnoutWebThres)
-        num = kn * p * a
-        exponent = 1/(1 - n)
-        denom = ((k/((8314/m)*t))*((2/(k+1))**((k+1)/(k-1))))**0.5
-        return (num/denom) ** exponent
+
+        if burnrate is None:
+            num = kn * p * a
+            exponent = 1/(1 - n)
+            denom = ((k/((8314/m)*t))*((2/(k+1))**((k+1)/(k-1))))**0.5
+            return (num/denom) ** exponent
+        else:
+            num = (k * 8314 / m * t) ** 0.5
+            denom = k * ((2 / (k + 1)) ** ((k + 1) / (k - 1))) ** 0.5
+            cstar = num / denom
+
+            return p * kn * burnrate * cstar
 
     def calcForce(self, r, casePressure = None, ambientPressure = 101325, burnoutWebThres = 0.00001):
         k = self.propellant.getProperty('k')
@@ -188,7 +196,7 @@ class motor():
                         len_ = grain.getProperty('length')
                         num_points = len_ / erosive_dx
 
-                        nonErosiveMFs = [0 for _ in range(int(num_points) + 1)]
+                        nonErosiveMFs = [0 for _ in np.linspace(0, len_, num_points + 1)]
                         # to calculate the total mass flux and regression for the grain, we split it into
                         # sections and iterate, stepping down by length dx and calculating mass flux and regression for
                         # each section.
@@ -209,7 +217,7 @@ class motor():
 
                             n_e = self.calcErosiveFraction(nonErosiveMFs[idx], r_0, prev_reg, grain)  # erosive burn fraction
                             # if n_e > 1.0:
-                            #     print(f"grain :{gid} has mass flux: {nonErosiveMF}, n_e: {n_e} at time: {simRes.channels['time'].getLast()}")
+                            #     print(f"grain :{gid} has mass flux: {nonErosiveMFs[idx]}, n_e: {n_e} at time: {simRes.channels['time'].getLast()}")
 
                             r_tot = r_0 * n_e  # r = r_0 * n_e
                             perDxRegressions[gid][idx] += r_tot * dt
@@ -217,14 +225,12 @@ class motor():
 
                         regs = list(perDxRegressions[gid].values())
                         perGrainMassFlux[gid] = np.max(nonErosiveMFs) # per-grain mass flux will be at aft of grain
-                        perGrainReg[gid] = np.mean(regs) # TODO: replace with something less hack-y
+                        perGrainReg[gid] = np.max(regs) # TODO: replace with something less hack-y
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
                         perGrainMassFlux[gid] = grain.getPeakMassFlux(totalMassFlow, dt, perGrainReg[gid], reg,
                                                          self.propellant.getProperty('density'))
-                        print(f"grain :{gid} has mass flux: {perGrainMassFlux[gid]} at time: {simRes.channels['time'].getLast()}")
-
                         perGrainReg[gid] += reg  # Apply the regression
 
                         totalMassFlow += grain.getSurfaceAreaAtRegression(reg) * self.propellant.getProperty('density') * r_0
@@ -241,7 +247,12 @@ class motor():
             simRes.channels['kn'].addData(self.calcKN(perGrainReg, burnoutWebThres))
 
             # Calculate Pressure
-            simRes.channels['pressure'].addData(self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres))
+            if erosive:
+                burnrate = np.max(list(prev_rates[-1].values())) # the aft end of the bottom grain: nozzle pressure
+                pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres, burnrate)
+            else:
+                pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres)
+            simRes.channels['pressure'].addData(pressure)
 
             # Calculate force
             simRes.channels['force'].addData(self.calcForce(perGrainReg, simRes.channels['pressure'].getLast(), ambientPressure, burnoutWebThres))
