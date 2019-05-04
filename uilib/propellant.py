@@ -10,7 +10,7 @@ from motorlib import propellant
 from . import collectionEditor
 from . import defaultPropellants
 from . import loadFile, saveFile, fileTypes, getConfigPath
-
+from .defaults import defaultPropellantProps
 
 class propellantManager(QObject):
 
@@ -100,11 +100,10 @@ class propellantMenu(QDialog):
                 propNumber += 1
             propName = propName + " " + str(propNumber)
         np = propellant()
-        np.setProperties({'name': propName, 'density': 1680, 'a': 3.517054143255937e-05, 'n': 0.3273, 't': 2800, 'm': 23.67, 'k': 1.21})
+        np.setProperties({'name': propName, **defaultPropellantProps})
         self.manager.propellants.append(np)
         self.setupPropList()
-        self.setupButtons()
-        self.manager.savePropellants()
+        self.editProp(np)
 
     def deleteProp(self):
         del self.manager.propellants[self.ui.listWidgetPropellants.currentRow()]
@@ -112,8 +111,9 @@ class propellantMenu(QDialog):
         self.setupPropList()
         self.setupButtons()
 
-    def editProp(self):
-        prop = self.manager.propellants[self.ui.listWidgetPropellants.currentRow()]
+    def editProp(self, prop=None):
+        if prop is None:
+            prop = self.manager.propellants[self.ui.listWidgetPropellants.currentRow()]
         self.ui.propEditor.loadProperties(prop)
         self.toggleButtons(True)
 
@@ -133,6 +133,8 @@ class propellantMenu(QDialog):
 
     def editorClosed(self):
         self.toggleButtons(False)
+        self.setupPropList()
+        self.manager.savePropellants()
 
     def toggleButtons(self, editing):
         self.ui.listWidgetPropellants.setEnabled(not editing)

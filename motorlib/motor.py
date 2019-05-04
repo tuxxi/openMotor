@@ -91,8 +91,7 @@ class motor():
         Erosive fraction is defined as r/r_0, where r is total burn rate, r_0 is steady-state burn rate
         """
         rho = self.propellant.getProperty('density')
-        # TODO: find actual values of mu. 1e-4 seems to be common
-        mu = 1e-4 # self.propellant.getProperty('mu')
+        mu = self.propellant.getProperty('mu')
         d_0 = grain.getCharacteristicLength(reg)
         Re_0 = (rho * r_0 * d_0) / mu           # Reynolds' Number.
         g_0 = G / (rho * r_0)                   # mass flux ratio
@@ -175,8 +174,9 @@ class motor():
 
         perGrainReg = [0 for _ in self.grains]  # total regression per grain: for non-erosive use
 
-        prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
-        perDxRegressions = [{} for _ in self.grains]  # total regression: per grain, per dx
+        if erosive:
+            prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
+            perDxRegressions = [{} for _ in self.grains]  # total regression: per grain, per dx
 
         # Perform timesteps until thrust is below thrust threshold percentage
         while simRes.channels['force'].getLast() > burnoutThrustThres * 0.01 * simRes.channels['force'].getMax():
@@ -216,16 +216,14 @@ class motor():
                             totalMassFlow += BurningSA * self.propellant.getProperty('density') * prev_rate
 
                             n_e = self.calcErosiveFraction(nonErosiveMFs[idx], r_0, prev_reg, grain)  # erosive burn fraction
-                            # if n_e > 1.0:
-                            #     print(f"grain :{gid} has mass flux: {nonErosiveMFs[idx]}, n_e: {n_e} at time: {simRes.channels['time'].getLast()}")
 
                             r_tot = r_0 * n_e  # r = r_0 * n_e
                             perDxRegressions[gid][idx] += r_tot * dt
                             prev_rates[gid][idx] = r_tot
 
-                        regs = list(perDxRegressions[gid].values())
-                        perGrainMassFlux[gid] = np.max(nonErosiveMFs) # per-grain mass flux will be at aft of grain
-                        perGrainReg[gid] = np.max(regs) # TODO: replace with something less hack-y
+                        perGrainMassFlux[gid] = np.max(nonErosiveMFs) # just record the max. mass flux
+                        # TODO ugly hack: calculate the average regression value and use that for the entire grain.
+                        perGrainReg[gid] = np.mean(list(perDxRegressions[gid].values()))
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
@@ -248,7 +246,7 @@ class motor():
 
             # Calculate Pressure
             if erosive:
-                burnrate = np.max(list(prev_rates[-1].values())) # the aft end of the bottom grain: nozzle pressure
+                burnrate = np.max(list(prev_rates[-1].values())) # use the max burn rate of the bottom grain
                 pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres, burnrate)
             else:
                 pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres)

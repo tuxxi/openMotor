@@ -1,8 +1,11 @@
 import motorlib
 
 from . import preferences
+from motorlib import propellant
 
-clProps = {'name': 'Cherry Limeade', 'density': 1680, 'a': 3.517054143255937e-05, 'n': 0.3273, 't': 3500, 'm': 23.67, 'k': 1.21}
+clProps = {'name': 'Cherry Limeade', 'density': 1680, 'a': 3.517054143255937e-05, 'n': 0.3273, 't': 3500, 'm': 23.67, 'k': 1.21, 'mu': 1e-4}
+defaultPropellantProps = {'density': 1680, 'a': 0, 'n': 0, 't': 0, 'm': 22.5, 'k': 1.25, 'mu': 1e-4}
+
 
 def defaultMotor():
     dm = motorlib.motor()
@@ -46,6 +49,6 @@ def defaultPropellants():
     cl.setProperties(clProps)
 
     ow = motorlib.propellant()
-    ow.setProperties({'name': 'Ocean Water', 'density': 1650, 'a': 1.467e-05, 'n': 0.382, 't': 3500, 'm': 23.67, 'k': 1.25})
+    ow.setProperties({'name': 'Ocean Water', 'density': 1650, 'a': 1.467e-05, 'n': 0.382, 't': 3500, 'm': 23.67, 'k': 1.25, 'mu': 1e-4})
 
     return [cl, ow]
