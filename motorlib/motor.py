@@ -262,15 +262,6 @@ class motor():
                 if callback(1 - progress): # If the callback returns true, it is time to cancel
                     return simRes
 
-        # simulation finished, add final zero data points.
-        simRes.channels['time'].addData(simRes.channels['time'].getLast() + dt)
-        simRes.channels['kn'].addData(0)
-        simRes.channels['pressure'].addData(0)
-        simRes.channels['force'].addData(0)
-        simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density') for grain in self.grains])
-        simRes.channels['massFlow'].addData([0 for _ in self.grains])
-        simRes.channels['massFlux'].addData([0 for _ in self.grains])
-
         simRes.success = True
 
         return simRes
