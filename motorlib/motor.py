@@ -30,8 +30,8 @@ class motor():
             self.grains[-1].setProperties(entry['properties'])
 
     def calcKn(self, r, burnoutWebThres=0.00001):
-        surfArea = np.sum([gr.getSurfaceAreaAtRegression(reg) for gr, reg in zip(self.grains, r)
-                           if gr.isWebLeft(reg, burnoutWebThres)])
+        surfArea = np.sum((gr.getSurfaceAreaAtRegression(reg) for gr, reg in zip(self.grains, r)
+                           if gr.isWebLeft(reg, burnoutWebThres)))
         nozzArea = self.nozzle.getThroatArea()
         return surfArea / nozzArea
 
@@ -69,7 +69,6 @@ class motor():
 
             if burnedOutSlices == len(regs[gid].values()):
                 topArea = bottomArea = portArea = 0
-                print(f"grain {gid} completely burned out")
 
             surfArea += portArea + topArea + bottomArea
 
@@ -82,13 +81,26 @@ class motor():
         index and len is the new step length adjusted for grain length regression: as the grain faces regress,
         the overall length decreases and invalidates some steps. This dict is used to filter the steps"""
 
+        def stepLength(dx, idx):
+            ret = erosive_dx
+            if offsetFromEnd < dx < regressedLen + offsetFromEnd:
+                # check if regression falls between two slices
+                if idx <= burnedOut or idx >= num_points - burnedOut - 1:
+                    ret = lenBurnedOut - offsetFromEnd
+
+            else: # this section is outside of grain length boundaries, so it burned out.
+                ret = 0
+
+            return ret
+
         regressedLen = grain.getRegressedLength(reg)
         len_ = grain.getProperty('length')
         offsetFromEnd = (len_ - regressedLen) / 2 # we assume the regression of length is even on both faces
         num_points = len_ / erosive_dx
+        burnedOut = np.ceil(offsetFromEnd / erosive_dx)  # how many slices have burned out at each end
+        lenBurnedOut = burnedOut * erosive_dx
 
-        return {idx: erosive_dx if (offsetFromEnd < dx < regressedLen + offsetFromEnd) else 0
-                for idx, dx in enumerate(np.linspace(0, len_, num_points + 1))}
+        return {idx: stepLength(dx, idx) for idx, dx in enumerate(np.linspace(0, len_, num_points + 1))}
 
     def calcIdealPressure(self, r, kn = None, burnoutWebThres = 0.00001, burnrate=None):
         k = self.propellant.getProperty('k')
@@ -312,7 +324,6 @@ class motor():
                 kn = self.calcKnFromSlices(perDxRegressions, totalSteadyStateReg, burnoutWebThres, erosive_dx)
                 pressure = self.calcIdealPressure(perGrainReg, kn, burnoutWebThres, burnrate)
                 non_erosive_kn = self.calcKn(perGrainReg, burnoutWebThres)
-                print(f"erosive_kn: {kn}, non_erosive_kn: {non_erosive_kn}")
             else:
                 kn = self.calcKn(perGrainReg, burnoutWebThres)
                 pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres)
