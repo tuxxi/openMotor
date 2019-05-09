@@ -6,7 +6,7 @@ from . import simulationResult, simAlert, simAlertLevel, simAlertType
 from . import endBurningGrain
 
 import numpy as np
-
+from copy import copy
 
 class motor():
     def __init__(self):
@@ -29,10 +29,66 @@ class motor():
             self.grains.append(grainTypes[entry['type']]())
             self.grains[-1].setProperties(entry['properties'])
 
-    def calcKN(self, r, burnoutWebThres = 0.00001):
-        surfArea = np.sum([gr.getSurfaceAreaAtRegression(reg) * int(gr.isWebLeft(reg, burnoutWebThres)) for gr, reg in zip(self.grains, r)])
-        nozz = self.nozzle.getThroatArea()
-        return surfArea / nozz
+    def calcKn(self, r, burnoutWebThres=0.00001):
+        surfArea = np.sum([gr.getSurfaceAreaAtRegression(reg) for gr, reg in zip(self.grains, r)
+                           if gr.isWebLeft(reg, burnoutWebThres)])
+        nozzArea = self.nozzle.getThroatArea()
+        return surfArea / nozzArea
+
+    def calcKnFromSlices(self, regs, steadyReg, burnoutWebThres=0.00001, erosive_dx=0.001):
+        """Calculate Kn from regressions of each grain slice, used in erosive burning simulation"""
+
+        def getFaceAreas(gid, grain):
+            """Get areas of top and bottom face of grain, based on erosive regressions"""
+            topArea = grain.getFaceArea(list(regs[gid].values())[0])
+            bottomArea = grain.getFaceArea(list(regs[gid].values())[-1])
+
+            # set areas to zero if they are inhibited
+            if grain.props['inhibitedEnds'].getValue == 'Top':
+                topArea = 0
+            if grain.props['inhibitedEnds'].getValue == 'Bottom':
+                bottomArea = 0
+            elif grain.props['inhibitedEnds'].getValue == 'Both':
+                topArea, bottomArea = 0, 0
+            return topArea, bottomArea
+
+        surfArea = 0
+        for gid, grain in enumerate(self.grains):
+            topArea, bottomArea = getFaceAreas(gid, grain)
+
+            portArea = 0
+            # dict of step lengths, used as filter for burned out sections
+            dxDict = self._createDxLengthDict(grain, steadyReg, erosive_dx)
+
+            burnedOutSlices = 0
+            for idx, reg in regs[gid].items():
+                if grain.isWebLeft(reg, burnoutWebThres): # does web exist for this slice?
+                    portArea += grain.getCorePerimeter(reg) * dxDict[idx]
+                else:
+                    burnedOutSlices += 1
+
+            if burnedOutSlices == len(regs[gid].values()):
+                topArea = bottomArea = portArea = 0
+                print(f"grain {gid} completely burned out")
+
+            surfArea += portArea + topArea + bottomArea
+
+        nozzArea = self.nozzle.getThroatArea()
+        return surfArea / nozzArea
+
+    @staticmethod
+    def _createDxLengthDict(grain, reg, erosive_dx):
+        """Creates a dict of lengths of each step along the grain in the format: {idx: len}. idx is the step
+        index and len is the new step length adjusted for grain length regression: as the grain faces regress,
+        the overall length decreases and invalidates some steps. This dict is used to filter the steps"""
+
+        regressedLen = grain.getRegressedLength(reg)
+        len_ = grain.getProperty('length')
+        offsetFromEnd = (len_ - regressedLen) / 2 # we assume the regression of length is even on both faces
+        num_points = len_ / erosive_dx
+
+        return {idx: erosive_dx if (offsetFromEnd < dx < regressedLen + offsetFromEnd) else 0
+                for idx, dx in enumerate(np.linspace(0, len_, num_points + 1))}
 
     def calcIdealPressure(self, r, kn = None, burnoutWebThres = 0.00001, burnrate=None):
         k = self.propellant.getProperty('k')
@@ -42,7 +98,7 @@ class motor():
         a = self.propellant.getProperty('a')
         n = self.propellant.getProperty('n')
         if kn is None:
-            kn = self.calcKN(r, burnoutWebThres)
+            kn = self.calcKn(r, burnoutWebThres)
 
         if burnrate is None:
             num = kn * p * a
@@ -155,7 +211,7 @@ class motor():
 
         # At t = ts, the motor has ignited
         simRes.channels['time'].addData(dt)
-        simRes.channels['kn'].addData(self.calcKN([0 for _ in self.grains], burnoutWebThres))
+        simRes.channels['kn'].addData(self.calcKn([0 for _ in self.grains], burnoutWebThres))
         simRes.channels['pressure'].addData(self.calcIdealPressure([0 for _ in self.grains], None, burnoutWebThres))
         simRes.channels['force'].addData(self.calcForce([0 for _ in self.grains], None, ambientPressure, burnoutWebThres))
         simRes.channels['mass'].addData([grain.getVolumeAtRegression(0) * self.propellant.getProperty('density')
@@ -173,10 +229,11 @@ class motor():
                 simRes.addAlert(simAlert(simAlertLevel.WARNING, simAlertType.CONSTRAINT, desc, 'N/A'))
 
         perGrainReg = [0 for _ in self.grains]  # total regression per grain: for non-erosive use
+        totalSteadyStateReg = 0
 
-        if erosive:
-            prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
-            perDxRegressions = [{} for _ in self.grains]  # total regression: per grain, per dx
+        # erosive params
+        prev_rates = [{} for _ in self.grains]  # erosive burn rate of previous time step: per grain, per dx.
+        perDxRegressions = [{} for _ in self.grains]  # total regression: per grain, per dx
 
         # Perform timesteps until thrust is below thrust threshold percentage
         while simRes.channels['force'].getLast() > burnoutThrustThres * 0.01 * simRes.channels['force'].getMax():
@@ -187,6 +244,8 @@ class motor():
 
             r_0 = self.calcSteadyStateBurnRate(simRes)  # steady state burn rate
             reg = r_0 * dt
+            totalSteadyStateReg += reg
+            rho = self.propellant.getProperty('density')
 
             # calculate regression and other per-grain parameters
             for gid, grain in enumerate(self.grains):
@@ -196,61 +255,69 @@ class motor():
                         len_ = grain.getProperty('length')
                         num_points = len_ / erosive_dx
 
+                        # dict of step lengths, used as filter for burned out sections
+                        dxDict = self._createDxLengthDict(grain, r_0, erosive_dx)
+
                         nonErosiveMFs = [0 for _ in np.linspace(0, len_, num_points + 1)]
+                        totalMass = 0
                         # to calculate the total mass flux and regression for the grain, we split it into
                         # sections and iterate, stepping down by length dx and calculating mass flux and regression for
                         # each section.
                         # note that this is _very_ slow!
                         for idx, dx in enumerate(np.linspace(0, len_, num_points + 1)):
+
                             if idx not in perDxRegressions[gid]:
                                 perDxRegressions[gid][idx] = 0
 
                             prev_reg = perDxRegressions[gid][idx]
                             prev_rate = prev_rates[gid].get(idx, r_0)
 
-                            nonErosiveMFs[idx] = grain.getMassFlux(totalMassFlow, dt, prev_reg, reg, dx,
-                                                                   self.propellant.getProperty('density'))
+                            if dxDict[idx] > 0: # this section has not burned out yet, so we will still calculate MF
+                                nonErosiveMFs[idx] = grain.getMassFlux(totalMassFlow, dt, prev_reg, reg, dx, rho)
 
-                            # scale burning SA to only this length dx
-                            BurningSA = grain.getSurfaceAreaAtRegression(prev_reg) / num_points
-                            totalMassFlow += BurningSA * self.propellant.getProperty('density') * prev_rate
+                                # scale burning SA to only this length dx
+                                BurningSA = grain.getCorePerimeter(prev_reg) * dxDict[idx]
+                                totalMassFlow += BurningSA * rho * prev_rate
+                                totalMass += grain.getVolumeAtRegression(prev_reg) * dxDict[idx] * rho
 
-                            n_e = self.calcErosiveFraction(nonErosiveMFs[idx], r_0, prev_reg, grain)  # erosive burn fraction
-
+                            # erosive burn fraction using non-erosive mass flux
+                            n_e = self.calcErosiveFraction(nonErosiveMFs[idx], r_0, prev_reg, grain)
                             r_tot = r_0 * n_e  # r = r_0 * n_e
                             perDxRegressions[gid][idx] += r_tot * dt
                             prev_rates[gid][idx] = r_tot
 
                         perGrainMassFlux[gid] = np.max(nonErosiveMFs) # just record the max. mass flux
-                        # TODO ugly hack: calculate the average regression value and use that for the entire grain.
-                        perGrainReg[gid] = np.mean(list(perDxRegressions[gid].values()))
+                        perGrainMass[gid] = totalMass
+
+                        # TODO ugly hack: use the head end regression to ensure the motor burns out completely.
+                        perGrainReg[gid] = list(perDxRegressions[gid].values())[0]
 
                     else:
                         # Find the mass flux through the grain based on the mass flow fed into from grains above it
-                        perGrainMassFlux[gid] = grain.getPeakMassFlux(totalMassFlow, dt, perGrainReg[gid], reg,
-                                                         self.propellant.getProperty('density'))
+                        perGrainMassFlux[gid] = grain.getPeakMassFlux(totalMassFlow, dt, perGrainReg[gid], reg, rho)
                         perGrainReg[gid] += reg  # Apply the regression
 
-                        totalMassFlow += grain.getSurfaceAreaAtRegression(reg) * self.propellant.getProperty('density') * r_0
+                        totalMassFlow += grain.getSurfaceAreaAtRegression(reg) * rho * r_0
 
-                perGrainMass[gid] = grain.getVolumeAtRegression(perGrainReg[gid]) * self.propellant.getProperty('density')  # Find the mass of the grain after regression
-                perGrainMassFlow[gid] = totalMassFlow
+                    perGrainMassFlow[gid] = totalMassFlow
 
             # add data points to simulation result
             simRes.channels['mass'].addData(perGrainMass)
             simRes.channels['massFlow'].addData(perGrainMassFlow)
             simRes.channels['massFlux'].addData(perGrainMassFlux)
 
-            # Calculate KN
-            simRes.channels['kn'].addData(self.calcKN(perGrainReg, burnoutWebThres))
-
-            # Calculate Pressure
+            # Calculate Pressure and KN
             if erosive:
                 burnrate = np.max(list(prev_rates[-1].values())) # use the max burn rate of the bottom grain
-                pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres, burnrate)
+                kn = self.calcKnFromSlices(perDxRegressions, totalSteadyStateReg, burnoutWebThres, erosive_dx)
+                pressure = self.calcIdealPressure(perGrainReg, kn, burnoutWebThres, burnrate)
+                non_erosive_kn = self.calcKn(perGrainReg, burnoutWebThres)
+                print(f"erosive_kn: {kn}, non_erosive_kn: {non_erosive_kn}")
             else:
+                kn = self.calcKn(perGrainReg, burnoutWebThres)
                 pressure = self.calcIdealPressure(perGrainReg, simRes.channels['kn'].getLast(), burnoutWebThres)
             simRes.channels['pressure'].addData(pressure)
+            simRes.channels['kn'].addData(kn)
 
             # Calculate force
             simRes.channels['force'].addData(self.calcForce(perGrainReg, simRes.channels['pressure'].getLast(), ambientPressure, burnoutWebThres))
@@ -262,6 +329,7 @@ class motor():
                 if callback(1 - progress): # If the callback returns true, it is time to cancel
                     return simRes
 
+        # simulation finished
         simRes.success = True
 
         return simRes

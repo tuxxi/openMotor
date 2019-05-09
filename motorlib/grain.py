@@ -83,13 +83,13 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
 
     def getEndPositions(self, r):
         if self.props['inhibitedEnds'].getValue() == 'Neither': # Neither
-            return [r, self.props['length'].getValue() - r]
+            return r, self.props['length'].getValue() - r
         elif self.props['inhibitedEnds'].getValue() == 'Top': # Top
-            return [0, self.props['length'].getValue() - r]
+            return 0, self.props['length'].getValue() - r
         elif self.props['inhibitedEnds'].getValue() == 'Bottom': # Bottom
-            return [r, self.props['length'].getValue()]
+            return r, self.props['length'].getValue()
         elif self.props['inhibitedEnds'].getValue() == 'Both':
-            return [0, self.props['length'].getValue()]
+            return 0, self.props['length'].getValue()
 
     @abstractmethod
     def getCorePerimeter(self, r):
@@ -110,7 +110,7 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
 
         return min(lengthLeft, wallLeft)
 
-    def getSurfaceAreaAtRegression(self, r):
+    def getTotalFaceArea(self, r):
         faceArea = self.getFaceArea(r)
         coreArea = self.getCoreSurfaceArea(r)
 
@@ -119,8 +119,10 @@ class perforatedGrain(grain): # A grain with a hole of some shape through the ce
             exposedFaces = 1
         if self.props['inhibitedEnds'].getValue() == 'Both':
             exposedFaces = 0
+        return exposedFaces * faceArea
 
-        return coreArea + (exposedFaces * faceArea)
+    def getSurfaceAreaAtRegression(self, r):
+        return self.getCoreSurfaceArea(r) + self.getTotalFaceArea(r)
 
     def getVolumeAtRegression(self, r):
         faceArea = self.getFaceArea(r)

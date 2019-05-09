@@ -17,9 +17,9 @@ class TestMotorMethods(unittest.TestCase):
         tm.grains.append(bg)
         tm.nozzle.setProperties({'throat': 0.01428})
 
-        self.assertAlmostEqual(tm.calcKN([0]), 180, 0)
-        self.assertAlmostEqual(tm.calcKN([0.0025]), 183, 0)
-        self.assertAlmostEqual(tm.calcKN([0.005]), 185, 0)
+        self.assertAlmostEqual(tm.calcKn([0]), 180, 0)
+        self.assertAlmostEqual(tm.calcKn([0.0025]), 183, 0)
+        self.assertAlmostEqual(tm.calcKn([0.005]), 185, 0)
 
 
     def test_calcPressure(self):
