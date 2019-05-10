@@ -179,6 +179,8 @@ class motor():
         rho = self.propellant.getProperty('density')
         mu = self.propellant.getProperty('mu')
         d_0 = grain.getCharacteristicLength(reg)
+        if d_0 == 0:
+            return 1.0
         Re_0 = (rho * r_0 * d_0) / mu           # Reynolds' Number.
         g_0 = G / (rho * r_0)                   # mass flux ratio
         g = g_0 * (Re_0 / 1000)**-0.125         # modified for size effects
