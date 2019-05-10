@@ -35,7 +35,7 @@ class motor():
         nozzArea = self.nozzle.getThroatArea()
         return surfArea / nozzArea
 
-    def calcKnFromSlices(self, regs, steadyReg, burnoutWebThres=0.00001, erosive_dx=0.001):
+    def calcKnFromSlices(self, regs, steadyReg, burnoutWebThres=0.00001, erosiveStep=1):
         """Calculate Kn from regressions of each grain slice, used in erosive burning simulation"""
 
         surfArea = 0
@@ -44,7 +44,7 @@ class motor():
 
             portArea = 0
             # dict of step lengths, used as filter for burned out sections
-            dxDict = self._createDxLengthDict(grain, steadyReg, erosive_dx)
+            dxDict = self._createDxLengthDict(grain, steadyReg, erosiveStep)
             burnedOutSlices = 0
             for idx, reg in regs[gid].items():
                 if grain.isWebLeft(reg, burnoutWebThres): # does web exist for this slice?
@@ -84,7 +84,7 @@ class motor():
         return topArea, bottomArea
 
     @staticmethod
-    def _createDxLengthDict(grain, reg, erosive_dx):
+    def _createDxLengthDict(grain, reg, erosiveStep):
         """Creates a dict of lengths of each step along the grain in the format: {idx: len}. idx is the step
         index and len is the new step length adjusted for grain length regression: as the grain faces regress,
         the overall length decreases and invalidates some steps. This dict is used to filter the steps"""
@@ -104,16 +104,17 @@ class motor():
         elif grain.props['inhibitedEnds'].getValue == 'Both':
             topDist, bottomDist = 0, regressedLen
 
-        num_points = len_ / erosive_dx
+        erosive_dx = (erosiveStep / 100) * len_
+        num_points = np.ceil(100 / erosiveStep)
         burnedOut = np.ceil(offsetFromEnd / erosive_dx)  # how many slices have burned out at each end
         lenBurnedOut = burnedOut * erosive_dx
 
         def stepLength(dx, idx):
             # check if slice has burned out yet
-            if topDist < dx < bottomDist and (burnedOut <= idx <= num_points - burnedOut):
+            if topDist < dx < bottomDist and (burnedOut <= idx <= num_points - burnedOut - 1):
                 step = erosive_dx
                 # check if our regression is inside of a slice
-                if idx <= burnedOut or idx > num_points - burnedOut - 1:
+                if idx <= burnedOut or idx >= num_points - burnedOut - 1:
                     step = lenBurnedOut - offsetFromEnd
             else: # this section is outside of grain length boundaries, so it burned out.
                 step = 0
@@ -198,7 +199,7 @@ class motor():
             burnoutThrustThres = preferences.general.getProperty('burnoutThrustThres')
             dt = preferences.general.getProperty('timestep')
             erosive = preferences.general.getProperty('erosive')
-            erosive_dx = preferences.general.getProperty('erosive_dx')
+            erosiveStep = preferences.general.getProperty('erosiveStep')
 
         else:
             ambientPressure = 101325
@@ -206,7 +207,7 @@ class motor():
             burnoutThrustThres = 0.1
             dt = 0.01
             erosive = False
-            erosive_dx = 0.001
+            erosiveStep = 1
 
         simRes = simulationResult(self)
 
@@ -286,14 +287,15 @@ class motor():
 
                     if erosive:
                         len_ = grain.getProperty('length')
-                        num_points = len_ / erosive_dx
+                        erosive_dx = (erosiveStep / 100) * len_
+                        num_points = np.ceil(100 / erosiveStep)
 
                         # add burning face areas to mass flow
                         topArea, bottomArea = self._getFaceAreas(gid, grain, perDxRegressions, reg)
                         totalMassFlow += topArea * r_0
 
                         # dict of step lengths, used as filter for burned out sections
-                        dxDict = self._createDxLengthDict(grain, r_0, erosive_dx)
+                        dxDict = self._createDxLengthDict(grain, r_0, erosiveStep)
 
                         erosiveMFs = [0 for _ in np.linspace(0, len_, num_points + 1)]
                         totalMass = 0
@@ -346,7 +348,7 @@ class motor():
             # Calculate Pressure and KN
             if erosive:
                 burnrate = np.max(list(prev_rates[-1].values())) # use the max burn rate of the bottom grain
-                kn = self.calcKnFromSlices(perDxRegressions, totalSteadyStateReg, burnoutWebThres, erosive_dx)
+                kn = self.calcKnFromSlices(perDxRegressions, totalSteadyStateReg, burnoutWebThres, erosiveStep)
                 pressure = self.calcIdealPressure(perGrainReg, kn, burnoutWebThres, burnrate)
             else:
                 kn = self.calcKn(perGrainReg, burnoutWebThres)

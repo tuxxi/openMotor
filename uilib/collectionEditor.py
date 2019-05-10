@@ -26,7 +26,6 @@ class collectionEditor(QWidget):
         self.stats = QVBoxLayout()
         self.layout().addLayout(self.stats)
 
-
         self.verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
         self.layout().addItem(self.verticalSpacer)
         

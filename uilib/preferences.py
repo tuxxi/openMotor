@@ -13,8 +13,8 @@ class preferences():
         self.general.props['timestep'] = floatProperty('Simulation Timestep', 's', 0.0001, 0.1)
         self.general.props['ambPressure'] = floatProperty('Ambient Pressure', 'Pa', 0.0001, 102000)
         self.general.props['mapDim'] = intProperty('Grain Map Dimension', '', 250, 2000)
-        self.general.props['erosive'] = boolProperty('Erosive Burning', False)
-        self.general.props['erosive_dx'] = floatProperty('Erosive Burn Step Value', 'm', 2.54e-4, 2.54e-1)
+        self.general.props['erosive'] = boolProperty('Erosive Burning [EXPERIMENTAL]', False)
+        self.general.props['erosiveStep'] = floatProperty('Erosive Burn Step Percentage', '%', 1e-2, 100)
         self.units = propertyCollection()
         for unit in unitLabels:
             self.units.props[unit] = enumProperty(unitLabels[unit], getAllConversions(unit))
