@@ -28,7 +28,7 @@ class floatProperty(property):
             super().setValue(value)
 
     def dispFormat(self, unit):
-        return str(round(units.convert(self.value, self.unit, unit), 3)) + ' ' + unit
+        return str(round(units.convert(self.value, self.unit, unit), 6)) + ' ' + unit
 
 class enumProperty(property):
     def __init__(self, dispName, values):
@@ -60,13 +60,19 @@ class stringProperty(property):
         super().__init__(dispName, '', str)
 
 
+class polygonProperty(property):
+    def __init__(self, dispName):
+        super().__init__(dispName, '', list)
+        self.value = []
+
+
 class boolProperty(property):
     def __init__(self, dispName, value):
         self.value = value
         super().__init__(dispName, '', bool)
 
 
-class propertyCollection:
+class propertyCollection():
     def __init__(self):
         self.props = {}
 

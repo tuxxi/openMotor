@@ -6,7 +6,7 @@ from motorlib import unitLabels, getAllConversions
 
 
 class preferences():
-    def __init__(self):
+    def __init__(self, propDict = None):
         self.general = propertyCollection()
         self.general.props['burnoutWebThres'] = floatProperty('Web Burnout Threshold', 'm', 2.54e-5, 3.175e-3)
         self.general.props['burnoutThrustThres'] = floatProperty('Thrust Burnout Threshold', '%', 0.01, 10)
@@ -18,6 +18,9 @@ class preferences():
         self.units = propertyCollection()
         for unit in unitLabels:
             self.units.props[unit] = enumProperty(unitLabels[unit], getAllConversions(unit))
+
+        if propDict is not None:
+            self.applyDict(dictionary)
 
     def getDict(self):
         prefDict = {}

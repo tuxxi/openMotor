@@ -1,4 +1,5 @@
 import motorlib
+from . import PolygonEditor
 
 import math
 
@@ -63,6 +64,14 @@ class propertyEditor(QWidget):
 
             self.layout().addWidget(self.editor)
 
+        elif type(prop) is motorlib.polygonProperty:
+            self.editor = PolygonEditor(self)
+
+            self.editor.pointsChanged.connect(self.valueChanged.emit)
+            self.editor.points = self.prop.getValue()
+            self.editor.preferences = self.preferences
+            self.layout().addWidget(self.editor)
+
         elif type(prop) is motorlib.boolProperty:
             self.editor = QCheckBox()
 
@@ -82,5 +91,8 @@ class propertyEditor(QWidget):
         elif type(self.prop) is motorlib.enumProperty:
             return self.editor.currentText()
 
+        elif type(self.prop) is motorlib.polygonProperty:
+            return self.editor.points
+
         elif type(self.prop) is motorlib.boolProperty:
-            return True if self.editor.isChecked() else False
+            return self.editor.isChecked()

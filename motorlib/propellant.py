@@ -2,7 +2,7 @@ from . import units
 from .properties import *
 
 class propellant(propertyCollection):
-    def __init__(self):
+    def __init__(self, propDict = None):
         super().__init__()
         self.props['name'] = stringProperty('Name')
         self.props['a'] = floatProperty('Burn rate Coefficient', 'm/(s*Pa^n)', 0, 2)
@@ -12,6 +12,9 @@ class propellant(propertyCollection):
         self.props['t'] = floatProperty('Combustion Temperature', 'K', 0, 10000)
         self.props['m'] = floatProperty('Exhaust Molar Mass', 'g/mol', 1e-6, 100)
         self.props['mu'] = floatProperty('Dynamic Viscosity', 'Pa*s', 0, 1e-1)
+
+        if propDict is not None:
+            self.setProperties(propDict)
 
     def getCStar(self):
         k = self.props['k'].getValue()
